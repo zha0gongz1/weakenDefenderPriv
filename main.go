@@ -137,7 +137,7 @@ func EnableDebugPrivilege(){
 }
 
 func SetPrivilege(hToken windows.Token,lpszPrivilege *uint16,bEnablePrivilege bool)(PanDan bool){
-	//var hToken syscall.Token
+
 	var tp windows.Tokenprivileges
 	var luid windows.LUID
 	err :=windows.LookupPrivilegeValue(nil, lpszPrivilege, &luid)
@@ -157,7 +157,7 @@ func SetPrivilege(hToken windows.Token,lpszPrivilege *uint16,bEnablePrivilege bo
 	tokenPrivLen := uint32(unsafe.Sizeof(tokenPriviledge))
 	err = windows.AdjustTokenPrivileges(hToken, false, &tp, tokenPrivLen, nil, nil)
 	if err != nil {
-		log.Fatal(err)				//GetLastError()
+		log.Fatal(err)				
 		return false
 	}else{
 		return true
@@ -183,7 +183,6 @@ func main() {
 		pid := uint32(ParentInfo.ProcessID)	
 		fmt.Println(pid)
 		const ProcessQueryInformation = windows.PROCESS_QUERY_LIMITED_INFORMATION
-		//pHandle, _ := syscall.OpenProcess(ProcessQueryInformation, false, pid)
 		pHandle, err := windows.OpenProcess(ProcessQueryInformation, false, pid)	
 		if err != nil {
 			log.Fatal(err)
