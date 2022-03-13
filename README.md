@@ -1,6 +1,6 @@
 # weakenDefenderPriv
 
-Without closing windows defender, to make defender useless by removing its token privileges and lowering the token integrity.
+Without closing windows defender, to make defender (and probably other AV/EDRs) useless by removing its token privileges and lowering the token integrity.
 
 Demo code of Golang, [here](https://github.com/pwn1sher/KillDefender) is the C++ version
 
